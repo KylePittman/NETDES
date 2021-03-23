@@ -5,6 +5,7 @@ class Packet:
     checksum = b'FFFFFFFF'
     data =b''
 
+
     def __init__(self, ID, data):
         self.ID = ID
         self.data = data

@@ -84,6 +84,7 @@ def send():
     namePkt = pkt.Packet(-2,bytes(names[len(names)-1].encode()))
     clientSocket.sendto(pickle.dumps(namePkt), (psa.IP, psa.port))
 
+
     # Transmit each packet from the array to the server
     for packet in packets:
         clientSocket.sendto(pickle.dumps(packet), (psa.IP, psa.port))
