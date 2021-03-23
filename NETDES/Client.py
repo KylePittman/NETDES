@@ -8,13 +8,13 @@ import pickle
 BEGIN_TRANSMISSION = 0
 END_TRANSMISSION = 1
 PACKETSIZE = 1024
+RECEIVESIZE = 2048
 INTEGRITYCHECK = True
 
 
 # Global variables for socket interaction
 socket_opened = False
 clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
 
 # Simple class to store IP and port together
 class Address:
@@ -87,20 +87,21 @@ def send():
 
     # Transmit each packet from the array to the server
     for packet in packets:
+        screenPrint(f"--Packet: {packet.ID}--")
         clientSocket.sendto(pickle.dumps(packet), (psa.IP, psa.port))
-
+        screenPrint("sent")
         # This will receive the packet sent back from the server and check if it is exactly the same as the original
         if INTEGRITYCHECK:
-            data, _ = clientSocket.recvfrom(PACKETSIZE)
-
+            data, _ = clientSocket.recvfrom(RECEIVESIZE)
+            screenPrint("received")
             integrityCheck = pickle.loads(data)
 
-            if packet == integrityCheck:
+            if packet.data == integrityCheck.data:
                 screenPrint("--Transmitted Packet Without Loss--")
             else:
                 screenPrint("--Transmitted Packet Failed Integrity Check--")
         else:
-            screenPrint(f"--Transmitted Packet {packet.ID}--")
+            screenPrint(f"--Transmitted Packet {packet.ID}--\n")
 
     # Notify the server that all data has been transmitted
     endPkt = pkt.Packet(-3, bytes([END_TRANSMISSION]))

@@ -5,11 +5,11 @@ import Packet
 import pickle
 
 
-
 # Global Constants
 BEGIN_TRANSMISSION = 0
 END_TRANSMISSION = 1
-PACKETSIZE = 1024
+PACKETSIZE = 1028
+RECEIVESIZE = 2048
 INTEGRITYCHECK = True
 
 # Global Variables
@@ -33,7 +33,7 @@ def openServer():
     if socket_opened:
         return
     address = parseAddressField(serverAddr)
-    screenPrint("--Opening Socket--")
+    screenPrint(f"--Opening Socket Port: {address.port}--")
     serverSocket.bind((address.IP, address.port))
     serverSocket.settimeout(0.01)
     socket_opened = True
@@ -57,7 +57,7 @@ def receive():
     if socket_opened:
         # wait to recieve a message
         try:
-            data, clientAddr = serverSocket.recvfrom(PACKETSIZE)
+            data, clientAddr = serverSocket.recvfrom(RECEIVESIZE)
         except:
             data = None
 
@@ -71,15 +71,16 @@ def receive():
             elif pkt.data == bytes([1]):
                 screenPrint("--End Transmission--")
                 writeFile()
-            elif filename == '':
+            elif pkt.ID == -2:
                 filename = pkt.data.decode()
-                screenPrint(f"--Filename: {filename}")
+                screenPrint(f"--Filename: {filename}--")
             else:
                 screenPrint("--Loading File--")
                 file = file + pkt.data
                 # send data back to client for quality check
                 if INTEGRITYCHECK:
-                    serverSocket.sendto(pickle.dumps(pkt.data), clientAddr)
+                    serverSocket.sendto(pickle.dumps(pkt), clientAddr)
+
 
     # This function calls itself every 100ms to allow tkinter's main function to run
     window.after(100, receive)
@@ -87,7 +88,6 @@ def receive():
 
 # Writes the data transmitted to a file of the same name in the same working directory of the program
 def writeFile():
-    print(type(file))
     global filename
     path = fd.askdirectory() + '\\' + filename
     f = open(path, 'wb')
