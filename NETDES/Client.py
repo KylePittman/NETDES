@@ -1,6 +1,8 @@
 import tkinter as tk
 import tkinter.filedialog as fd
 import socket
+import Packet as pkt
+import pickle
 
 # Global Constants
 BEGIN_TRANSMISSION = 0
@@ -28,7 +30,7 @@ def openSocket():
     if socket_opened:
         return
     address = parseAddressField(clientAddr)
-    screenPrint(f"--Opening Scoket Port: {address.port}--")
+    screenPrint(f"--Opening Socket Port: {address.port}--")
     clientSocket.bind((address.IP, address.port))
     socket_opened = True
 
@@ -61,10 +63,12 @@ def send():
 
     packets = []
 
-    packet = file.read(PACKETSIZE)
-    while packet:
-        packets.append(packet)
-        packet = file.read(PACKETSIZE)
+    packetData = file.read(PACKETSIZE)
+    sequenceNumber = 0
+    while packetData:
+        packets.append(pkt.Packet(sequenceNumber, packetData))
+        packetData = file.read(PACKETSIZE)
+        sequenceNumber += 1
 
 
     # Begin transmitting file
@@ -72,28 +76,35 @@ def send():
     psa = parseAddressField(serverAddr)
 
     # Send notification to server that a file is going to be transmitted
-    clientSocket.sendto(bytes([BEGIN_TRANSMISSION]), (psa.IP, psa.port))
+    beginPkt = pkt.Packet(-1,bytes([BEGIN_TRANSMISSION]))
+    clientSocket.sendto(pickle.dumps(beginPkt), (psa.IP, psa.port))
 
     # Parse the name of the file from the path and transmit it to the server
     names = filename.get().split('/')
-    clientSocket.sendto(names[len(names)-1].encode(), (psa.IP, psa.port))
+    namePkt = pkt.Packet(-2,bytes(names[len(names)-1].encode()))
+    clientSocket.sendto(pickle.dumps(namePkt), (psa.IP, psa.port))
 
     # Transmit each packet from the array to the server
     for packet in packets:
-        clientSocket.sendto(packet, (psa.IP, psa.port))
+        clientSocket.sendto(pickle.dumps(packet), (psa.IP, psa.port))
 
         # This will receive the packet sent back from the server and check if it is exactly the same as the original
         if INTEGRITYCHECK:
-            integrityCheck, _ = clientSocket.recvfrom(PACKETSIZE)
+            data, _ = clientSocket.recvfrom(PACKETSIZE)
+
+            integrityCheck = pickle.loads(data)
 
             if packet == integrityCheck:
                 screenPrint("--Transmitted Packet Without Loss--")
             else:
                 screenPrint("--Transmitted Packet Failed Integrity Check--")
+        else:
+            screenPrint(f"--Transmitted Packet {packet.ID}--")
 
     # Notify the server that all data has been transmitted
-    clientSocket.sendto(bytes([END_TRANSMISSION]), (psa.IP, psa.port))
-
+    endPkt = pkt.Packet(-3, bytes([END_TRANSMISSION]))
+    clientSocket.sendto(pickle.dumps(endPkt), (psa.IP, psa.port))
+    screenPrint("--File Transmitted--")
 
 # Open window to select a file
 def fileSelect():

@@ -1,6 +1,8 @@
 import tkinter as tk
 import tkinter.filedialog as fd
 import socket
+import Packet
+import pickle
 
 
 # Global Constants
@@ -57,22 +59,26 @@ def receive():
             data, clientAddr = serverSocket.recvfrom(PACKETSIZE)
         except:
             data = None
+
         if data is not None:
+            pkt = pickle.loads(data)
+            screenPrint(f'--Received Packet [{pkt.ID}]--')
             # print received message, and the IP it came from
-            if data == bytes([0]):
+            if pkt.data == bytes([0]):
                 screenPrint("--Begin Transmission--")
                 file = b''
-            elif data == bytes([1]):
+            elif pkt.data == bytes([1]):
                 screenPrint("--End Transmission--")
                 writeFile()
             elif filename == '':
-                filename = data.decode()
+                filename = pkt.data.decode()
+                screenPrint(f"--Filename: {filename}")
             else:
-                screenPrint("--Receiving Packets--")
-                file = file + data
+                screenPrint("--Loading File--")
+                file = file + pkt.data
                 # send data back to client for quality check
                 if INTEGRITYCHECK:
-                    serverSocket.sendto(data, clientAddr)
+                    serverSocket.sendto(pickle.dumps(pkt.data), clientAddr)
 
     # This function calls itself every 100ms to allow tkinter's main function to run
     window.after(100, receive)
