@@ -3,14 +3,19 @@ import tkinter.filedialog as fd
 import socket
 import Packet
 import pickle
+import secrets
 
 
 # Global Constants
-BEGIN_TRANSMISSION = 0
-END_TRANSMISSION = 1
+BEGIN_TRANSMISSION = Packet.BEGIN_TRANSMISSION
+SYN_ACK = Packet.SYN_ACK
+END_TRANSMISSION = Packet.END_TRANSMISSION
 PACKETSIZE = 1028
-RECEIVESIZE = 2048
+RECIEVESIZE = 2048
+ACTIVE_TRANSMISSION = False
 INTEGRITYCHECK = True
+SEQUENCEID = True
+
 
 # Global Variables
 filename = ''
@@ -52,39 +57,78 @@ def screenPrint(msg):
 
 # Main running function to receive transmitted data
 def receive():
-    global filename, file
-
     if socket_opened:
         # wait to recieve a message
         try:
-            data, clientAddr = serverSocket.recvfrom(RECEIVESIZE)
+            data, clientAddr = serverSocket.recvfrom(RECIEVESIZE)
         except:
             data = None
 
         if data is not None:
-            pkt = pickle.loads(data)
-            screenPrint(f'--Received Packet [{pkt.ID}]--')
-            # print received message, and the IP it came from
-            if pkt.data == bytes([0]):
-                screenPrint("--Begin Transmission--")
-                file = b''
-            elif pkt.data == bytes([1]):
-                screenPrint("--End Transmission--")
-                writeFile()
-            elif pkt.ID == -2:
-                filename = pkt.data.decode()
-                screenPrint(f"--Filename: {filename}--")
-            else:
-                screenPrint("--Loading File--")
-                file = file + pkt.data
-                # send data back to client for quality check
-                if INTEGRITYCHECK:
-                    serverSocket.sendto(pickle.dumps(pkt), clientAddr)
+            packet = pickle.loads(data)
+
+            screenPrint('--Received Packet--')
+
+            processPacket(packet, clientAddr)
 
 
     # This function calls itself every 100ms to allow tkinter's main function to run
     window.after(100, receive)
 
+def initializeLink(clientAddr):
+    global SEQUENCEID, ACK, filename, file, ACTIVE_TRANSMISSION
+    ACK = secrets.token_hex(16).encode()
+    ACTIVE_TRANSMISSION = True
+    screenPrint("--Begin Transmission--")
+    screenPrint(f"--ACK: {ACK}--")
+    sendACK(clientAddr)
+    file = b''
+    filename = ""
+
+
+def terminateLink(clientAddr):
+    global ACTIVE_TRANSMISSION
+    screenPrint("--End Transmission--")
+    ACTIVE_TRANSMISSION = False
+    writeFile()
+    sendACK(clientAddr)
+
+def sendNACK(clientAddr):
+    nackPacket = Packet.Packet(b'\x00\x00\x00\x00')
+    nackPacket.ID = SEQUENCEID
+    serverSocket.sendto(pickle.dumps(nackPacket), clientAddr)
+
+def sendACK(clientAddr):
+    ackPacket = Packet.Packet(ACK)
+    ackPacket.ID = SEQUENCEID
+    serverSocket.sendto(pickle.dumps(ackPacket), clientAddr)
+
+def processPacket(packet, clientAddr):
+    global file, filename, SEQUENCEID
+
+    checksum = packet.checksum
+    packet.generateChecksum()
+
+    if packet.checksum != checksum or SEQUENCEID == packet.ID:
+        screenPrint(f"--CS: {checksum} | PCS: {packet.checksum} | SQ: {SEQUENCEID} | PID: {packet.ID}--")
+        sendNACK(clientAddr)
+        screenPrint("--Sent NACK--")
+    else:
+        if packet.data == SYN_ACK:
+            initializeLink(clientAddr)
+        elif packet.data == END_TRANSMISSION:
+            terminateLink(clientAddr)
+        elif filename == "":
+            filename = packet.data.decode()
+            screenPrint(f"--Filename: {filename}--")
+            sendACK(clientAddr)
+        else:
+            screenPrint("--Loading File--")
+            file = file + packet.data
+            sendACK(clientAddr)
+
+        SEQUENCEID = packet.ID
+    return
 
 # Writes the data transmitted to a file of the same name in the same working directory of the program
 def writeFile():

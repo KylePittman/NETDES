@@ -1,16 +1,19 @@
 import tkinter as tk
 import tkinter.filedialog as fd
 import socket
-import Packet as pkt
+import Packet
 import pickle
+import secrets
 
 # Global Constants
-BEGIN_TRANSMISSION = 0
-END_TRANSMISSION = 1
+BEGIN_TRANSMISSION = Packet.BEGIN_TRANSMISSION
+SYN_ACK = Packet.SYN_ACK
+END_TRANSMISSION = Packet.END_TRANSMISSION
 PACKETSIZE = 1024
-RECEIVESIZE = 2048
+RECIEVESIZE = 2048
 INTEGRITYCHECK = True
-
+SEQUENCEID = False
+ACK = -1
 
 # Global variables for socket interaction
 socket_opened = False
@@ -41,7 +44,7 @@ def parseAddressField(field):
     return Address(IP = temp[0], port = temp[1])
 
 # Reads in file and transmits it to server
-def send():
+def sendFile():
     global filename
 
     # Ensure that a file has been selected, and the IPs have been input
@@ -53,6 +56,30 @@ def send():
         screenPrint("--Please Enter Both Addresses--")
         return
 
+    fileData = segmentFile()
+
+    # Begin transmitting file
+    screenPrint("--Sending---")
+    psa = parseAddressField(serverAddr)
+    # Send notification to server that a file is going to be transmitted
+    synack(psa)
+
+    # Parse the name of the file from the path and transmit it to the server
+    transmitFileName(psa)
+
+    # Transmit each packet from the array to the server
+    transmitFile(fileData, psa)
+
+    # Notify the server that all data has been transmitted
+    terminateStream(psa)
+
+
+# Open window to select a file
+def fileSelect():
+    global filename
+    filename.set(fd.askopenfile(mode = 'rb').name)
+
+def segmentFile():
     # Read the file as binary into an array of packets
 
     try:
@@ -61,57 +88,83 @@ def send():
         screenPrint("--ERROR OPENING FILE--")
         return
 
-    packets = []
+    fileData = []
 
     packetData = file.read(PACKETSIZE)
-    sequenceNumber = 0
+
     while packetData:
-        packets.append(pkt.Packet(sequenceNumber, packetData))
+        fileData.append(packetData)
         packetData = file.read(PACKETSIZE)
-        sequenceNumber += 1
+
+    return fileData
+
+def sendPacket(packet, psa):
+    clientSocket.sendto(pickle.dumps(packet), (psa.IP, psa.port))
+
+def receivePacket(prevPacket, psa):
+    screenPrint("--Waiting for ACK--")
+    try:
+        data, _ = clientSocket.recvfrom(RECIEVESIZE)
+    except:
+        data = None
+
+    if data is not None:
+        packet = pickle.loads(data)
+        screenPrint(f"--ACK: {packet.data} | PID: {packet.ID}--")
+        checksum = packet.checksum
+        packet.generateChecksum()
+
+        if packet.checksum != checksum or SEQUENCEID != packet.ID or (ACK != -1 and ACK != packet.data):
+            screenPrint("--Resending--")
+            sendPacket(prevPacket, psa)
+            return receivePacket(prevPacket, psa)
+        screenPrint("--Received ACK--")
+        return packet
+    return receivePacket(prevPacket, psa)
 
 
-    # Begin transmitting file
-    screenPrint("--Sending---")
-    psa = parseAddressField(serverAddr)
 
-    # Send notification to server that a file is going to be transmitted
-    beginPkt = pkt.Packet(-1,bytes([BEGIN_TRANSMISSION]))
-    clientSocket.sendto(pickle.dumps(beginPkt), (psa.IP, psa.port))
+def pack(data):
+    global SEQUENCEID
+    packet = Packet.Packet(data)
+    packet.ID = SEQUENCEID
+    SEQUENCEID = not SEQUENCEID
+    return packet
 
-    # Parse the name of the file from the path and transmit it to the server
+def synack(psa):
+    global ACK
+    synackPacket = pack(SYN_ACK)
+
+    sendPacket(synackPacket, psa)
+    ackPacket = receivePacket(synackPacket, psa)
+    ACK = ackPacket.data
+    screenPrint(f"--ACK: {ACK}--")
+
+def transmitFileName(psa):
     names = filename.get().split('/')
-    namePkt = pkt.Packet(-2,bytes(names[len(names)-1].encode()))
-    clientSocket.sendto(pickle.dumps(namePkt), (psa.IP, psa.port))
+    namePacket = pack(names[len(names) - 1].encode())
+    screenPrint("--Transmitting File Name--")
+    sendPacket(namePacket, psa)
+
+    receivePacket(namePacket, psa)
 
 
-    # Transmit each packet from the array to the server
-    for packet in packets:
-        screenPrint(f"--Packet: {packet.ID}--")
-        clientSocket.sendto(pickle.dumps(packet), (psa.IP, psa.port))
-        screenPrint("sent")
-        # This will receive the packet sent back from the server and check if it is exactly the same as the original
-        if INTEGRITYCHECK:
-            data, _ = clientSocket.recvfrom(RECEIVESIZE)
-            screenPrint("received")
-            integrityCheck = pickle.loads(data)
+def transmitFile(fileData, psa):
+    for index, packetData in enumerate(fileData):
+        screenPrint(f"--Transmitting Packet [{index}] of [{len(fileData)}]--")
+        packet = pack(packetData)
+        sendPacket(packet, psa)
+        screenPrint("--Transmitted Packet--")
 
-            if packet.data == integrityCheck.data:
-                screenPrint("--Transmitted Packet Without Loss--")
-            else:
-                screenPrint("--Transmitted Packet Failed Integrity Check--")
-        else:
-            screenPrint(f"--Transmitted Packet {packet.ID}--\n")
+        receivePacket(packet, psa)
 
-    # Notify the server that all data has been transmitted
-    endPkt = pkt.Packet(-3, bytes([END_TRANSMISSION]))
-    clientSocket.sendto(pickle.dumps(endPkt), (psa.IP, psa.port))
-    screenPrint("--File Transmitted--")
 
-# Open window to select a file
-def fileSelect():
-    global filename
-    filename.set(fd.askopenfile(mode = 'rb').name)
+def terminateStream(psa):
+    screenPrint("--File Sent--")
+    eosPacket = pack(END_TRANSMISSION)
+    sendPacket(eosPacket, psa)
+    receivePacket(eosPacket, psa)
+
 
 # Print text to window
 def screenPrint(msg):
@@ -124,7 +177,7 @@ clientAddr = tk.StringVar()
 serverAddr = tk.StringVar()
 filename = tk.StringVar()
 
-window.title("Client RDT 1.0")
+window.title("Client RDT 2.2")
 
 window.rowconfigure([0, 1, 2, 3, 4, 5], minsize = 50, weight = 1)
 window.columnconfigure([0, 1], minsize = 50, weight = 1)
@@ -160,7 +213,7 @@ txt_output.grid(row = 4,column = 1, sticky = "nsew")
 btn_open = tk.Button(master = window, text = "Open Socket", command = openSocket)
 btn_open.grid(row = 5, column = 0, sticky = "nsew")
 
-btn_send = tk.Button(master = window, text = "Send", command = send)
+btn_send = tk.Button(master = window, text = "Send", command = sendFile)
 btn_send.grid(row = 5, column = 1, sticky = "nsew")
 
 window.mainloop()

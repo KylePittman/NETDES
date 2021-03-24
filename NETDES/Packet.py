@@ -1,12 +1,15 @@
-
+BEGIN_TRANSMISSION = b'\x00\x00\x00\01'
+SYN_ACK = b'\x00\x00\x00\x02'
+END_TRANSMISSION = b'\x00\x00\x00\03'
+SOCKET_TIMEOUT = 1000
 
 class Packet:
+
     ID = -1
-    checksum = b'FFFFFFFF'
+    checksum = b'\xFF\xFF\xFF\xFF'
     data =b''
 
-    def __init__(self, ID, data):
-        self.ID = ID
+    def __init__(self, data):
         self.data = data
         self.generateChecksum()
 
