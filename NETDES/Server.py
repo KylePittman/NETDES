@@ -12,17 +12,28 @@ SYN_ACK = Packet.SYN_ACK
 END_TRANSMISSION = Packet.END_TRANSMISSION
 PACKETSIZE = 1028
 RECIEVESIZE = 2048
-ACTIVE_TRANSMISSION = False
-INTEGRITYCHECK = True
-SEQUENCEID = True
 
+INTEGRITYCHECK = True
+
+NOERRORSIM = 0
+ACKERRORSIM = 1
+DATAERRORSIM = 2
+
+ERRORSIM = NOERRORSIM
+
+
+ACKERROR = 10
+ERRORCLEARED = False
 
 # Global Variables
 filename = ''
 file = b''
+filePacketsReceived = 0
 socket_opened = False
 serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-
+sequenceID = True
+activeTransmission = False
+dataErrors = 0
 
 # Simple class to store port and IP together
 class Address:
@@ -53,6 +64,7 @@ def parseAddressField(field):
 # Print Text to window
 def screenPrint(msg):
     txt_output.insert(tk.END, f"{msg} \n")
+    txt_output.see("end")
 
 
 # Main running function to receive transmitted data
@@ -67,7 +79,7 @@ def receive():
         if data is not None:
             packet = pickle.loads(data)
 
-            screenPrint('--Received Packet--')
+            screenPrint(f'--Received Packet SID: {sequenceID} | PID: {packet.ID}--')
 
             processPacket(packet, clientAddr)
 
@@ -76,43 +88,62 @@ def receive():
     window.after(100, receive)
 
 def initializeLink(clientAddr):
-    global SEQUENCEID, ACK, filename, file, ACTIVE_TRANSMISSION
+    global sequenceID, ACK, filename, file, activeTransmission, filePacketsReceived, dataErrors
+    sequenceID = True
+    dataErrors = 0
     ACK = secrets.token_hex(16).encode()
-    ACTIVE_TRANSMISSION = True
+    activeTransmission = True
     screenPrint("--Begin Transmission--")
     screenPrint(f"--ACK: {ACK}--")
     sendACK(clientAddr)
     file = b''
     filename = ""
+    filePacketsReceived = 0
+
 
 
 def terminateLink(clientAddr):
-    global ACTIVE_TRANSMISSION
+    global activeTransmission
     screenPrint("--End Transmission--")
-    ACTIVE_TRANSMISSION = False
-    writeFile()
+    activeTransmission = False
     sendACK(clientAddr)
+    print("help")
+    writeFile()
 
 def sendNACK(clientAddr):
     nackPacket = Packet.Packet(b'\x00\x00\x00\x00')
-    nackPacket.ID = SEQUENCEID
+    nackPacket.ID = sequenceID
     serverSocket.sendto(pickle.dumps(nackPacket), clientAddr)
 
 def sendACK(clientAddr):
+    global ERRORCLEARED
     ackPacket = Packet.Packet(ACK)
-    ackPacket.ID = SEQUENCEID
+    ackPacket.ID = sequenceID
     serverSocket.sendto(pickle.dumps(ackPacket), clientAddr)
 
+def sendERRORACK(clientAddr):
+    global ERRORCLEARED
+    errorACK = secrets.token_hex(16).encode()
+    errAckPacket = Packet.Packet(ACK)
+    errAckPacket.data = errorACK
+    errAckPacket.ID = sequenceID
+    serverSocket.sendto(pickle.dumps(errAckPacket), clientAddr)
+
+
 def processPacket(packet, clientAddr):
-    global file, filename, SEQUENCEID
+    global file, filename, sequenceID, filePacketsReceived, ERRORCLEARED, dataErrors
 
     checksum = packet.checksum
     packet.generateChecksum()
 
-    if packet.checksum != checksum or SEQUENCEID == packet.ID:
-        screenPrint(f"--CS: {checksum} | PCS: {packet.checksum} | SQ: {SEQUENCEID} | PID: {packet.ID}--")
-        sendNACK(clientAddr)
-        screenPrint("--Sent NACK--")
+    if packet.checksum != checksum or sequenceID == packet.ID:
+        screenPrint(f"--CCS: {checksum} | PCS: {packet.checksum} | SQ: {sequenceID} | PID: {packet.ID}--")
+        dataErrors += 1
+        #if packet.checksum == checksum and sequenceID == packet.ID:
+        sequenceID = not packet.ID
+        sendACK(clientAddr)
+        sequenceID = packet.ID
+
     else:
         if packet.data == SYN_ACK:
             initializeLink(clientAddr)
@@ -123,12 +154,23 @@ def processPacket(packet, clientAddr):
             screenPrint(f"--Filename: {filename}--")
             sendACK(clientAddr)
         else:
-            screenPrint("--Loading File--")
+            screenPrint(f"--Loading File - Packet [{filePacketsReceived}]--")
             file = file + packet.data
-            sendACK(clientAddr)
 
-        SEQUENCEID = packet.ID
+            if ERRORSIM == ACKERRORSIM and ((filePacketsReceived % 20) < (ACKERROR/5)) and ERRORCLEARED:
+                sendERRORACK(clientAddr)
+                ERRORCLEARED = False
+            else:
+                screenPrint("--Packet Loaded--")
+                sendACK(clientAddr)
+                filePacketsReceived += 1
+                if ERRORSIM != 0:
+                    ERRORCLEARED = True
+
+        sequenceID = packet.ID
+    screenPrint("\n")
     return
+
 
 # Writes the data transmitted to a file of the same name in the same working directory of the program
 def writeFile():

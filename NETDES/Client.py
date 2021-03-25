@@ -12,12 +12,23 @@ END_TRANSMISSION = Packet.END_TRANSMISSION
 PACKETSIZE = 1024
 RECIEVESIZE = 2048
 INTEGRITYCHECK = True
-SEQUENCEID = False
+
+NOERRORSIM = 0
+DATAERRORSIM = 1
+
+ERRORSIM = DATAERRORSIM
+
+DATAERROR = 10
+ERRORCLEARED = False
+
 ACK = -1
 
-# Global variables for socket interaction
+# Global variables
 socket_opened = False
 clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+sequenceID = False
+
+dataErrors = 0
 
 # Simple class to store IP and port together
 class Address:
@@ -43,10 +54,12 @@ def parseAddressField(field):
     temp = field.get().split(":")
     return Address(IP = temp[0], port = temp[1])
 
+
 # Reads in file and transmits it to server
 def sendFile():
-    global filename
-
+    global filename, ackErrors, dataErrors
+    ackErrors = 0
+    dataErrors = 0
     # Ensure that a file has been selected, and the IPs have been input
     if filename.get() == '':
         screenPrint("--Please Select A File--")
@@ -98,41 +111,61 @@ def segmentFile():
 
     return fileData
 
+
 def sendPacket(packet, psa):
+    screenPrint(f"--Sending ID: {packet.ID}--")
     clientSocket.sendto(pickle.dumps(packet), (psa.IP, psa.port))
+    window.update()
+
+
+def sendErrorPacket(packet, psa):
+    sendPacket(packet, psa)
+
+    #errorPacket = Packet.Packet(secrets.token_hex(1024).encode())
+    #errorPacket.checksum = packet.checksum
+    #errorPacket.ID = packet.ID
+    #print("--Sending Bad Data--")
+    #clientSocket.sendto(pickle.dumps(errorPacket), (psa.IP, psa.port))
+
 
 def receivePacket(prevPacket, psa):
-    screenPrint("--Waiting for ACK--")
+    global dataErrors
+    print("--Waiting for ACK--")
     try:
         data, _ = clientSocket.recvfrom(RECIEVESIZE)
     except:
         data = None
+        print("no data")
 
+    print("data in")
     if data is not None:
         packet = pickle.loads(data)
-        screenPrint(f"--ACK: {packet.data} | PID: {packet.ID}--")
+        print(f"--ACK: {packet.data} | PID: {packet.ID}--")
         checksum = packet.checksum
         packet.generateChecksum()
 
-        if packet.checksum != checksum or SEQUENCEID != packet.ID or (ACK != -1 and ACK != packet.data):
-            screenPrint("--Resending--")
+        if packet.checksum != checksum or sequenceID != packet.ID:
+            print(f"--Resending {prevPacket.ID}--")
             sendPacket(prevPacket, psa)
+            dataErrors += 1
             return receivePacket(prevPacket, psa)
-        screenPrint("--Received ACK--")
+        screenPrint("--Received ACK--\n")
         return packet
     return receivePacket(prevPacket, psa)
 
 
 
 def pack(data):
-    global SEQUENCEID
+    global sequenceID
     packet = Packet.Packet(data)
-    packet.ID = SEQUENCEID
-    SEQUENCEID = not SEQUENCEID
+    packet.ID = sequenceID
+    sequenceID = not sequenceID
     return packet
 
 def synack(psa):
-    global ACK
+    global ACK, sequenceID
+    sequenceID = False
+    screenPrint(f'--SYNACK ID: {sequenceID}')
     synackPacket = pack(SYN_ACK)
 
     sendPacket(synackPacket, psa)
@@ -150,13 +183,22 @@ def transmitFileName(psa):
 
 
 def transmitFile(fileData, psa):
+    global ERRORCLEARED
     for index, packetData in enumerate(fileData):
-        screenPrint(f"--Transmitting Packet [{index}] of [{len(fileData)}]--")
+        screenPrint(f"--Transmitting Packet [{index}] of [{len(fileData) - 1}]--")
         packet = pack(packetData)
-        sendPacket(packet, psa)
-        screenPrint("--Transmitted Packet--")
 
+        if ERRORSIM == DATAERRORSIM and ((index % 20) < (DATAERROR / 5)) and ERRORCLEARED:
+            screenPrint("--Enter Bad Packet--")
+            sendErrorPacket(packet, psa)
+            ERRORCLEARED = False
+        else:
+            sendPacket(packet, psa)
+            screenPrint("--Transmitted Packet--")
+            ERRORCLEARED = True
+        print("trying to receive")
         receivePacket(packet, psa)
+        print("received fu")
 
 
 def terminateStream(psa):
@@ -169,6 +211,7 @@ def terminateStream(psa):
 # Print text to window
 def screenPrint(msg):
     txt_output.insert(tk.END, f"{msg} \n")
+    txt_output.see("end")
 
 
 # Window Setup
@@ -209,6 +252,7 @@ lbl_output.grid(row = 4, column = 0, sticky = "nsew")
 
 txt_output = tk.Text(master = window)
 txt_output.grid(row = 4,column = 1, sticky = "nsew")
+txt_output.see(tk.END)
 
 btn_open = tk.Button(master = window, text = "Open Socket", command = openSocket)
 btn_open.grid(row = 5, column = 0, sticky = "nsew")
