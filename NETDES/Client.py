@@ -18,7 +18,7 @@ DATAERRORSIM = 1
 
 ERRORSIM = DATAERRORSIM
 
-DATAERROR = 10
+DATAERROR = 20
 ERRORCLEARED = False
 
 ACK = -1
@@ -85,6 +85,7 @@ def sendFile():
 
     # Notify the server that all data has been transmitted
     terminateStream(psa)
+    screenPrint(f"--Number of Data Errors: {dataErrors}--")
 
 
 # Open window to select a file
@@ -119,37 +120,38 @@ def sendPacket(packet, psa):
 
 
 def sendErrorPacket(packet, psa):
-    sendPacket(packet, psa)
+    #sendPacket(packet, psa)
 
-    #errorPacket = Packet.Packet(secrets.token_hex(1024).encode())
-    #errorPacket.checksum = packet.checksum
-    #errorPacket.ID = packet.ID
-    #print("--Sending Bad Data--")
+    errorPacket = Packet.Packet(b'\x11\x22\x33\x44')
+    errorPacket.checksum = packet.checksum
+    errorPacket.ID = packet.ID
+    screenPrint("--Sending Bad Data--")
+    sendPacket(errorPacket, psa)
     #clientSocket.sendto(pickle.dumps(errorPacket), (psa.IP, psa.port))
 
 
 def receivePacket(prevPacket, psa):
-    global dataErrors
-    print("--Waiting for ACK--")
+    global dataErrors, ERRORSIM, ERRORCLEARED
+    screenPrint("--Waiting for ACK--")
     try:
         data, _ = clientSocket.recvfrom(RECIEVESIZE)
     except:
         data = None
         print("no data")
 
-    print("data in")
     if data is not None:
         packet = pickle.loads(data)
-        print(f"--ACK: {packet.data} | PID: {packet.ID}--")
+        screenPrint(f"--ACK: {packet.data} | PID: {packet.ID}--")
         checksum = packet.checksum
         packet.generateChecksum()
 
         if packet.checksum != checksum or sequenceID != packet.ID:
-            print(f"--Resending {prevPacket.ID}--")
+            screenPrint(f"--Resending {prevPacket.ID}--")
             sendPacket(prevPacket, psa)
             dataErrors += 1
             return receivePacket(prevPacket, psa)
         screenPrint("--Received ACK--\n")
+        ERRORCLEARED = True
         return packet
     return receivePacket(prevPacket, psa)
 
@@ -183,7 +185,7 @@ def transmitFileName(psa):
 
 
 def transmitFile(fileData, psa):
-    global ERRORCLEARED
+    global ERRORCLEARED, dataErrors
     for index, packetData in enumerate(fileData):
         screenPrint(f"--Transmitting Packet [{index}] of [{len(fileData) - 1}]--")
         packet = pack(packetData)
@@ -196,9 +198,7 @@ def transmitFile(fileData, psa):
             sendPacket(packet, psa)
             screenPrint("--Transmitted Packet--")
             ERRORCLEARED = True
-        print("trying to receive")
         receivePacket(packet, psa)
-        print("received fu")
 
 
 def terminateStream(psa):
