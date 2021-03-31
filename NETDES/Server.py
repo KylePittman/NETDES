@@ -17,6 +17,8 @@ INTEGRITYCHECK = True
 
 NOERRORSIM = 0
 ACKERRORSIM = 1
+ACKLOSSSIM = 2
+ERRORLIST = ("No Errors", "ACK Errors", "ACK Packet Loss")
 
 ERRORSIM = NOERRORSIM
 
@@ -79,16 +81,19 @@ def receive():
             packet = pickle.loads(data)
 
             screenPrint(f'--Received Packet SID: {sequenceID} | PID: {packet.ID}--')
-
+            # Process received packet
             processPacket(packet, clientAddr)
 
 
     # This function calls itself every 100ms to allow tkinter's main function to run
     window.after(100, receive)
 
+
+# Begin tranmission with Client, create ACK token, initialize transmission variables
 def initializeLink(clientAddr):
     global sequenceID, ACK, filename, file, activeTransmission, filePacketsReceived, dataErrors
     sequenceID = True
+    parseErrorField()
     dataErrors = 0
     ACK = secrets.token_hex(16).encode()
     activeTransmission = True
@@ -100,7 +105,7 @@ def initializeLink(clientAddr):
     filePacketsReceived = 0
 
 
-
+# End Transmission after receiving EOS from client
 def terminateLink(clientAddr):
     global activeTransmission
     screenPrint("--End Transmission--")
@@ -108,17 +113,22 @@ def terminateLink(clientAddr):
     sendACK(clientAddr)
     writeFile()
 
+# Send a NACK
 def sendNACK(clientAddr):
     nackPacket = Packet.Packet(b'\x00\x00\x00\x00')
     nackPacket.ID = sequenceID
     serverSocket.sendto(pickle.dumps(nackPacket), clientAddr)
 
+
+# Send an ACK
 def sendACK(clientAddr):
     global ERRORCLEARED
     ackPacket = Packet.Packet(ACK)
     ackPacket.ID = sequenceID
     serverSocket.sendto(pickle.dumps(ackPacket), clientAddr)
 
+
+# Send a corrupted ACK
 def sendERRORACK(clientAddr):
     global ERRORCLEARED
     errorACK = secrets.token_hex(16).encode()
@@ -129,12 +139,14 @@ def sendERRORACK(clientAddr):
     screenPrint("--Sent Bad ACK--")
 
 
+# Processes the received packet, and sends appropriate response to client
 def processPacket(packet, clientAddr):
     global file, filename, sequenceID, filePacketsReceived, ERRORCLEARED, dataErrors
 
     checksum = packet.checksum
     packet.generateChecksum()
 
+    # Detect data errors, respond to client accordingly based on errors
     if packet.checksum != checksum or sequenceID == packet.ID:
         screenPrint("-- Packet Error --")
         screenPrint(f"--CCS: {checksum} | PCS: {packet.checksum} | SQ: {sequenceID} | PID: {packet.ID}--")
@@ -147,25 +159,36 @@ def processPacket(packet, clientAddr):
             sequenceID = packet.ID
             sendACK(clientAddr)
             sequenceID = not packet.ID
-
+    # Process valid data
     else:
+        # Begin link to client
         if packet.data == SYN_ACK:
             initializeLink(clientAddr)
+        # Terminate link to client
         elif packet.data == END_TRANSMISSION:
             terminateLink(clientAddr)
             screenPrint(f"--Number of Data Errors: {dataErrors}--")
+        # Load filename if it has not yet been sent
         elif filename == "":
             filename = packet.data.decode()
             screenPrint(f"--Filename: {filename}--")
             sendACK(clientAddr)
+        # Process File Data
         else:
             screenPrint(f"--Loading File - Packet [{filePacketsReceived}]--")
+            # Load packet data to file
             file = file + packet.data
 
+            # Corrupt ACKERROR % of ACKs
             if ERRORSIM == ACKERRORSIM and ((filePacketsReceived % 20) < (ACKERROR/5)) and ERRORCLEARED:
                 sendERRORACK(clientAddr)
                 dataErrors += 1
                 ERRORCLEARED = False
+            # Drop ACKERROR % of ACKs
+            elif ERRORSIM == ACKLOSSSIM and ((filePacketsReceived % 20) < (ACKERROR/5)) and ERRORCLEARED:
+                screenPrint("--Dropped ACK Packet--")
+                ERRORCLEARED = False
+            # Default Ack return
             else:
                 screenPrint("--Packet Loaded--")
                 sendACK(clientAddr)
@@ -188,15 +211,32 @@ def writeFile():
     filename = ''
 
 
+# Determine which error simulation will occur
+def parseErrorField():
+    global ERRORSIM
+    print(ERRORSELECT.get())
+    if ERRORSELECT.get() == ERRORLIST[NOERRORSIM]:
+        ERRORSIM = NOERRORSIM
+    elif ERRORSELECT.get() == ERRORLIST[ACKERRORSIM]:
+        ERRORSIM = ACKERRORSIM
+    else:
+        ERRORSIM = ACKLOSSSIM
+
+
 # Set up window
 window = tk.Tk()
 serverAddr = tk.StringVar()
 
-window.title("Server RDT 1.0")
+window.title("Server RDT 3.0")
 
 
 window.rowconfigure([0, 1, 2, 3], minsize=50, weight=1)
 window.columnconfigure([0, 1], minsize=50, weight=1)
+
+ERRORSELECT = tk.StringVar(window)
+ERRORSELECT.set(ERRORLIST[0])
+om_ErrorSelection = tk.OptionMenu(window, ERRORSELECT, *ERRORLIST)
+om_ErrorSelection.grid(row = 0, column = 1, sticky = "nsew")
 
 lbl_title = tk.Label(master=window, text="UDP File Transfer RDT 1.0")
 lbl_title.grid(row=0, column=0, sticky="nsew")
