@@ -24,7 +24,7 @@ ERRORLIST = ("No Errors", "ACK Errors", "ACK Packet Loss")
 ERRORSIM = NOERRORSIM
 
 
-ACKERROR = 10
+ACKERROR = 20
 ERRORCLEARED = False
 
 # Global Variables
@@ -164,6 +164,7 @@ def processPacket(packet, clientAddr):
             sequenceID = packet.ID
             sendACK(clientAddr)
             sequenceID = not packet.ID
+        ERRORCLEARED = True
     # Process valid data
     else:
         # Begin link to client
