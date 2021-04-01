@@ -4,6 +4,7 @@ import socket
 import Packet
 import pickle
 import secrets
+import time
 
 
 # Global Constants
@@ -35,6 +36,7 @@ serverSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sequenceID = True
 activeTransmission = False
 dataErrors = 0
+startTime = 0
 
 # Simple class to store port and IP together
 class Address:
@@ -103,15 +105,18 @@ def initializeLink(clientAddr):
     file = b''
     filename = ""
     filePacketsReceived = 0
+    startTimer()
 
 
 # End Transmission after receiving EOS from client
 def terminateLink(clientAddr):
     global activeTransmission
+    transmissionTime = time.perf_counter() - startTime
     screenPrint("--End Transmission--")
     activeTransmission = False
     sendACK(clientAddr)
     writeFile()
+    screenPrint(f"--Time of Transmission: {transmissionTime} seconds--")
 
 # Send a NACK
 def sendNACK(clientAddr):
@@ -200,6 +205,9 @@ def processPacket(packet, clientAddr):
     screenPrint("\n")
     return
 
+def startTimer():
+    global startTime
+    startTime = time.perf_counter()
 
 # Writes the data transmitted to a file of the same name in the same working directory of the program
 def writeFile():
@@ -238,7 +246,7 @@ ERRORSELECT.set(ERRORLIST[0])
 om_ErrorSelection = tk.OptionMenu(window, ERRORSELECT, *ERRORLIST)
 om_ErrorSelection.grid(row = 0, column = 1, sticky = "nsew")
 
-lbl_title = tk.Label(master=window, text="UDP File Transfer RDT 1.0")
+lbl_title = tk.Label(master=window, text="Error Sim Type: ")
 lbl_title.grid(row=0, column=0, sticky="nsew")
 
 lbl_serverAddress = tk.Label(master=window, text="Server Address (xxx.xxx.x.x:xxxx) : ")

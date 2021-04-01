@@ -3,6 +3,7 @@ import tkinter.filedialog as fd
 import socket
 import Packet
 import pickle
+import time
 
 # Global Constants
 BEGIN_TRANSMISSION = Packet.BEGIN_TRANSMISSION
@@ -32,6 +33,7 @@ clientSocket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
 sequenceID = False
 
 dataErrors = 0
+startTime = 0
 
 
 # Simple class to store IP and port together
@@ -194,6 +196,7 @@ def synack(psa):
     ackPacket = receivePacket(synackPacket, psa)
     ACK = ackPacket.data
     screenPrint(f"--ACK: {ACK}--")
+    startTimer()
 
 
 # Transmit the name of the file
@@ -240,6 +243,8 @@ def terminateStream(psa):
     eosPacket = pack(END_TRANSMISSION)
     sendPacket(eosPacket, psa)
     receivePacket(eosPacket, psa)
+    transmissionTime = time.perf_counter() - startTime
+    screenPrint(f"--Transmission Time: {transmissionTime} seconds--")
 
 
 # Print text to window
@@ -258,6 +263,10 @@ def parseErrorField():
         ERRORSIM = DATAERRORSIM
     else:
         ERRORSIM = PACKETLOSSSIM
+
+def startTimer():
+    global startTime
+    startTime = time.perf_counter()
 
 
 # Only runs window setup once
